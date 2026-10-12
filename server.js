@@ -297,7 +297,14 @@ function sendGithubStats(res) {
 const staticExtensions = ['.js', '.css', '.png', '.webp', '.jpg', '.ico', '.svg', '.woff', '.woff2'];
 
 const server = http.createServer((req, res) => {
-  const pathname = decodeURIComponent((req.url || '/').split('?')[0]);
+  let pathname;
+  try {
+    pathname = decodeURIComponent((req.url || '/').split('?')[0]);
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('400 Bad Request');
+    return;
+  }
 
   if (pathname === '/api/github-stats') {
     sendGithubStats(res);
