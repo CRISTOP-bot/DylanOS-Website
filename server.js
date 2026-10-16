@@ -294,9 +294,9 @@ function sendGithubStats(res) {
 }
 
 // Extensiones estáticas que deben servirse directamente
-const staticExtensions = ['.js', '.css', '.png', '.webp', '.jpg', '.ico', '.svg', '.woff', '.woff2'];
+const staticExtensions = ['.js', '.css', '.json', '.xml', '.txt', '.png', '.webp', '.jpg', '.ico', '.svg', '.woff', '.woff2'];
 
-const server = http.createServer((req, res) => {
+function handleRequest(req, res) {
   let pathname;
   try {
     pathname = decodeURIComponent((req.url || '/').split('?')[0]);
@@ -360,23 +360,33 @@ const server = http.createServer((req, res) => {
       });
       return;
     } else {
-      let contentType = 'text/html';
-      if (filePath.endsWith('.js')) contentType = 'application/javascript';
-      if (filePath.endsWith('.css')) contentType = 'text/css';
-      if (filePath.endsWith('.png')) contentType = 'image/png';
-      if (filePath.endsWith('.webp')) contentType = 'image/webp';
-      if (filePath.endsWith('.jpg')) contentType = 'image/jpeg';
-      if (filePath.endsWith('.ico')) contentType = 'image/x-icon';
-      if (filePath.endsWith('.svg')) contentType = 'image/svg+xml';
-      if (filePath.endsWith('.woff')) contentType = 'font/woff';
-      if (filePath.endsWith('.woff2')) contentType = 'font/woff2';
-      if (filePath.endsWith('.html')) contentType = 'text/html; charset=utf-8';
-      res.writeHead(200, { 'Content-Type': contentType });
+      const contentTypes = {
+        '.html': 'text/html; charset=utf-8',
+        '.js': 'application/javascript; charset=utf-8',
+        '.css': 'text/css; charset=utf-8',
+        '.json': 'application/json; charset=utf-8',
+        '.xml': 'application/xml; charset=utf-8',
+        '.txt': 'text/plain; charset=utf-8',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+        '.jpg': 'image/jpeg',
+        '.ico': 'image/x-icon',
+        '.svg': 'image/svg+xml',
+        '.woff': 'font/woff',
+        '.woff2': 'font/woff2'
+      };
+      const contentType = contentTypes[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+      res.writeHead(200, { 'Content-Type': contentType, 'X-Content-Type-Options': 'nosniff' });
       res.end(content);
     }
   });
-});
+}
 
-server.listen(PORT, () => {
-  console.log(`Servidor ejecutándose en http://127.0.0.1:${PORT}`);
-});
+if (require.main === module) {
+  const server = http.createServer(handleRequest);
+  server.listen(PORT, () => {
+    console.log(`Servidor ejecutándose en http://127.0.0.1:${PORT}`);
+  });
+}
+
+module.exports = { handleRequest };

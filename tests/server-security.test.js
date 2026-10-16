@@ -1,70 +1,66 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
-const http = require('node:http');
-const net = require('node:net');
-const path = require('node:path');
+const { EventEmitter } = require('node:events');
 const test = require('node:test');
+const { handleRequest } = require('../server');
 
-const repositoryRoot = path.resolve(__dirname, '..');
-
-function getAvailablePort() {
+function dispatch(pathname, method = 'GET') {
   return new Promise((resolve, reject) => {
-    const listener = net.createServer();
-    listener.once('error', reject);
-    listener.listen(0, '127.0.0.1', () => {
-      const { port } = listener.address();
-      listener.close(error => error ? reject(error) : resolve(port));
-    });
-  });
-}
+    const req = new EventEmitter();
+    req.url = pathname;
+    req.method = method;
+    req.socket = { remoteAddress: '127.0.0.1' };
 
-function request(port, requestPath) {
-  return new Promise((resolve, reject) => {
-    const req = http.request({
-      hostname: '127.0.0.1',
-      port,
-      path: requestPath,
-      method: 'GET'
-    }, response => {
-      response.resume();
-      response.once('end', () => resolve(response.statusCode));
-    });
-    req.setTimeout(1000, () => req.destroy(new Error('request timed out')));
-    req.once('error', reject);
-    req.end();
-  });
-}
+    const res = {
+      statusCode: null,
+      headers: {},
+      writeHead(statusCode, headers = {}) {
+        this.statusCode = statusCode;
+        this.headers = headers;
+      },
+      end(body = '') {
+        resolve({ statusCode: this.statusCode, headers: this.headers, body: String(body) });
+      }
+    };
 
-async function waitForServer(port, child) {
-  const deadline = Date.now() + 5000;
-  while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`server exited with code ${child.exitCode}`);
-    }
     try {
-      await request(port, '/');
-      return;
-    } catch {
-      await new Promise(resolve => setTimeout(resolve, 50));
+      handleRequest(req, res);
+    } catch (error) {
+      reject(error);
     }
-  }
-  throw new Error('server did not start within 5 seconds');
+  });
 }
 
-test('malformed percent-encoded paths return 400 without crashing the server', async t => {
-  const port = await getAvailablePort();
-  const child = spawn(process.execPath, ['server.js'], {
-    cwd: repositoryRoot,
-    env: { ...process.env, PORT: String(port) },
-    stdio: 'ignore'
-  });
-  t.after(() => {
-    if (child.exitCode === null) child.kill();
-  });
+test('malformed percent-encoded paths return 400 without crashing the handler', async () => {
+  const response = await dispatch('/%E0%A4%A');
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.body, '400 Bad Request');
+  assert.equal((await dispatch('/')).statusCode, 200);
+});
 
-  await waitForServer(port, child);
-  assert.equal(await request(port, '/%E0%A4%A'), 400);
-  assert.equal(await request(port, '/'), 200);
+test('Vercel assistant route reuses the server handler and rejects GET', async () => {
+  const assistantHandler = require('../api/asistente');
+  assert.equal(typeof assistantHandler, 'function');
+  assert.equal(typeof require('../api/github-stats'), 'function');
+
+  const response = await dispatch('/api/asistente');
+  assert.equal(response.statusCode, 405);
+  assert.match(response.headers['Content-Type'], /application\/json/);
+});
+
+test('manifest and stylesheet exist and are served with correct MIME types', async () => {
+  const manifest = await dispatch('/manifest.json');
+  assert.equal(manifest.statusCode, 200);
+  assert.match(manifest.headers['Content-Type'], /application\/json/);
+  assert.equal(JSON.parse(manifest.body).short_name, 'DylanOS');
+
+  const stylesheet = await dispatch('/styles/css2.css');
+  assert.equal(stylesheet.statusCode, 200);
+  assert.match(stylesheet.headers['Content-Type'], /text\/css/);
+
+  const page = await dispatch('/');
+  assert.match(page.body, /<source srcset="\.\/images\/84654fb6f_Screenshot_6\.webp" type="image\/webp">/);
+  assert.equal((await dispatch('/images/84654fb6f_Screenshot_6.webp')).statusCode, 200);
+  assert.equal((await dispatch('/images/84654fb6f_Screenshot_6.png')).statusCode, 200);
 });
